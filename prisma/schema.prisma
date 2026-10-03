@@ -1,0 +1,232 @@
+// HRMS schema — SQLite by default.
+// To use MySQL: change provider to "mysql" and DATABASE_URL to
+// mysql://USER:PASSWORD@localhost:3306/hrms  (no other change needed;
+// enum-like fields are plain strings on purpose so both DBs work).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────── Organization ─────────────
+
+model Company {
+  id           String   @id @default(cuid())
+  name         String
+  headquarters String
+  createdAt    DateTime @default(now())
+}
+
+model Country {
+  id           String       @id @default(cuid())
+  name         String       @unique
+  code         String       @unique
+  subsidiaries Subsidiary[]
+}
+
+model Subsidiary {
+  id            String         @id @default(cuid())
+  name          String         @unique
+  city          String
+  countryId     String
+  country       Country        @relation(fields: [countryId], references: [id])
+  timezone      String
+  currency      String
+  weekendDays   String         @default("0,6") // JS getUTCDay() numbers, comma separated
+  isActive      Boolean        @default(true)
+  departments   Department[]
+  users         User[]
+  leaveTypes    LeaveType[]
+  holidays      Holiday[]
+  announcements Announcement[]
+  createdAt     DateTime       @default(now())
+
+  @@index([countryId])
+}
+
+model Department {
+  id            String        @id @default(cuid())
+  name          String
+  subsidiaryId  String
+  subsidiary    Subsidiary    @relation(fields: [subsidiaryId], references: [id])
+  designations  Designation[]
+  users         User[]
+
+  @@unique([subsidiaryId, name])
+}
+
+model Designation {
+  id           String     @id @default(cuid())
+  name         String
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id])
+  users        User[]
+
+  @@unique([departmentId, name])
+}
+
+// ───────────── Users & roles ─────────────
+
+model Role {
+  id          String @id @default(cuid())
+  name        String @unique // SUPER_ADMIN | HR_MANAGER | DEPT_HEAD | TEAM_LEAD | EMPLOYEE
+  label       String
+  permissions String // JSON array of permission keys
+  users       User[]
+}
+
+model User {
+  id            String       @id @default(cuid())
+  employeeCode  String       @unique
+  name          String
+  email         String       @unique
+  passwordHash  String
+  phone         String?
+  roleId        String
+  role          Role         @relation(fields: [roleId], references: [id])
+  subsidiaryId  String?
+  subsidiary    Subsidiary?  @relation(fields: [subsidiaryId], references: [id])
+  departmentId  String?
+  department    Department?  @relation(fields: [departmentId], references: [id])
+  designationId String?
+  designation   Designation? @relation(fields: [designationId], references: [id])
+
+  // Reporting hierarchy (self-reference)
+  managerId String?
+  manager   User?   @relation("ManagerReports", fields: [managerId], references: [id], onDelete: SetNull)
+  reports   User[]  @relation("ManagerReports")
+
+  joiningDate DateTime
+  status      String   @default("ACTIVE") // ACTIVE | ON_LEAVE | TERMINATED
+  createdAt   DateTime @default(now())
+
+  leaveBalances       LeaveBalance[]
+  leaveRequests       LeaveRequest[]
+  approvalSteps       LeaveApprovalStep[]
+  attendance          Attendance[]
+  notifications       Notification[]
+  announcementsAuthor Announcement[]
+
+  @@index([subsidiaryId])
+  @@index([departmentId])
+  @@index([managerId])
+}
+
+// ───────────── Leave management ─────────────
+
+model LeaveType {
+  id                      String         @id @default(cuid())
+  name                    String
+  subsidiaryId            String
+  subsidiary              Subsidiary     @relation(fields: [subsidiaryId], references: [id])
+  defaultAnnualQuota      Float
+  requiresEscalation      Boolean        @default(false)
+  escalationThresholdDays Int            @default(3)
+  isPaid                  Boolean        @default(true)
+  balances                LeaveBalance[]
+  requests                LeaveRequest[]
+
+  @@unique([subsidiaryId, name])
+}
+
+model LeaveBalance {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  leaveTypeId String
+  leaveType   LeaveType @relation(fields: [leaveTypeId], references: [id])
+  year        Int
+  allotted    Float
+  used        Float     @default(0)
+
+  @@unique([userId, leaveTypeId, year])
+}
+
+model LeaveRequest {
+  id                 String              @id @default(cuid())
+  userId             String
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  leaveTypeId        String
+  leaveType          LeaveType           @relation(fields: [leaveTypeId], references: [id])
+  startDate          DateTime
+  endDate            DateTime
+  totalDays          Float // working days (weekends + holidays excluded)
+  reason             String
+  status             String              @default("PENDING") // PENDING | APPROVED | REJECTED | CANCELLED
+  currentApprovalStep Int                @default(1)
+  requiresEscalation Boolean             @default(false)
+  createdAt          DateTime            @default(now())
+  steps              LeaveApprovalStep[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model LeaveApprovalStep {
+  id             String       @id @default(cuid())
+  leaveRequestId String
+  leaveRequest   LeaveRequest @relation(fields: [leaveRequestId], references: [id], onDelete: Cascade)
+  approverId     String
+  approver       User         @relation(fields: [approverId], references: [id])
+  level          Int // 1 = line manager, 2 = department head
+  decision       String       @default("PENDING") // PENDING | APPROVED | REJECTED
+  comment        String?
+  decidedAt      DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@unique([leaveRequestId, level])
+  @@index([approverId, decision])
+}
+
+// ───────────── Calendar, attendance, comms ─────────────
+
+model Holiday {
+  id           String     @id @default(cuid())
+  subsidiaryId String
+  subsidiary   Subsidiary @relation(fields: [subsidiaryId], references: [id])
+  name         String
+  date         DateTime
+
+  @@unique([subsidiaryId, date])
+}
+
+model Attendance {
+  id       String    @id @default(cuid())
+  userId   String
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date     DateTime
+  status   String // PRESENT | LATE | WFH | ABSENT | ON_LEAVE
+  checkIn  DateTime?
+  checkOut DateTime?
+
+  @@unique([userId, date])
+  @@index([date])
+}
+
+model Announcement {
+  id           String      @id @default(cuid())
+  title        String
+  body         String
+  scope        String // GLOBAL | SUBSIDIARY
+  subsidiaryId String?
+  subsidiary   Subsidiary? @relation(fields: [subsidiaryId], references: [id])
+  createdById  String
+  createdBy    User        @relation(fields: [createdById], references: [id])
+  createdAt    DateTime    @default(now())
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message   String
+  link      String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+}
