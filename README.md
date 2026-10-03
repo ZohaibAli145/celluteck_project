@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Cellutech HRMS
 
 A multi-subsidiary HR Management System built for the Cellutech FZCO technical assessment, following the provided SRS. Employees apply for leave, requests route through a reporting-hierarchy-based approval chain (line manager → department head when escalated), and every role gets a dashboard driven by live database data.
@@ -127,3 +128,6 @@ Same pattern for other subsidiaries and departments: `hr.karachi@…`, `head.sal
 | `npx prisma migrate dev` | Apply migrations |
 | `npx prisma db seed` | Reset + load demo data |
 | `npx prisma studio` | Browse the database |
+=======
+# celluteck_project
+>>>>>>> 7afb864e5c970210ec70240852d680588970fd94
